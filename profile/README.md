@@ -114,14 +114,14 @@ Subscribes: account.created.
 #### gRPC
 ```
 service AdminMaster {
-  rpc CreateAdmin(CreateAdminRequest) returns (CreateAdminResponse);
   rpc BanEntity(BanEntityRequest) returns (BanEntityResponse);
   rpc UnbanEntity(UnbanEntityRequest) returns (UnbanEntityResponse);
   rpc ApproveRefund(ApproveRefundRequest) returns (ApproveRefundResponse);
 }
 ```
 #### Kafka
-Publishes: admin.ban_changed, admin.refund_approved.
+* Publishes: admin.created, admin.ban.changed, admin.make.refund.
+* Subscribes: admin.create, account.deleted
 ### 6. Ride Service - управление поездками
 Здесь водитель принимает заказ. (сказать на защите)
 #### Сущности
@@ -132,12 +132,11 @@ service RideService {
   rpc CreateRide(CreateRideRequest) returns (CreateRideResponse);
   rpc CancelRide(CancelRideRequest) returns (CancelRideResponse);
   rpc GetRide(GetRideRequest) returns (RideDto);
-  rpc UpdateRideStatus(UpdateRideStatusRequest) returns (UpdateRideStatusResponse);
 }
 ```
 #### Kafka
 Publishes: ride.requested, ride.cancelled, ride.started, ride.completed, ride.assigned (публикует в ответ на dispatch).
-Subscribes: dispatch.driver_assigned.
+Subscribes: dispatch.driver.assignation, ride.confirmation, taxi.driver.status.changed.
 ### 7. Route Service - построение маршрутов и ETA
 Расчёт маршрутов между точками, выдача полных путей для драйвера.
 #### Сущности
@@ -151,32 +150,21 @@ service RouteService {
 ```
 #### Хранилище
 Используем локальную картографическую библиотеку. (сказать на защите)
-### 8. Dispatch Service - только Kafka (только реактивноe взаимодействие, сказать на защите)
+### 8. Dispatch Service
 Подбирает кандидатов водителей для перевозки пассажира
 #### Логика
-- Хранит локальный snapshot доступных водителей (обновляется из taxi.driver.status_changed).
-- На ride.requested - фильтрует кандидатов по сегменту авто, расстоянию, рейтингу и публикует dispatch.driver_assigned(ride_id, driver_id, eta).
+- Хранит локальный snapshot доступных водителей (обновляется из taxi.driver.status.changed).
+- На ride.requested - фильтрует кандидатов по сегменту авто, расстоянию, рейтингу и публикует dispatch.assignation.
 #### Валидации
 Необходимо TaxiMaster.ValidateDriverActive(driver_id).
 #### Kafka
-Subscribes: ride.requested, taxi.driver.status_changed, ride.cancelled.
-Publishes: dispatch.driver_assigned, dispatch.assignment_failed.
-### 9. Finance Service - кошельки и расчеты
+Subscribes: ride.requested, taxi.driver.status.changed, ride.cancelled.
+Publishes: dispatch.assignation.
+### 9. Finance Service - кошельки и расчеты - только Kafka (только реактивноe взаимодействие, сказать на защите)
 Управляет кошельками пассажиров (ручка top-up в gateway), проводит списания за поездку, возврат средств на счет (по админ-решению), начисление чаевых водителю.
 #### Сущности
 - Wallet { wallet_id, owner_id (passenger|driver), balance_cents }
 - Transaction { id, wallet_id, type (topup|charge|tip|refund|payout), amount, status, created_at }
-#### gRPC
-```
-service FinanceService {
-  rpc TopUp(TopUpRequest) returns (TopUpResponse);
-  rpc ChargeForRide(ChargeRequest) returns (ChargeForRideResponse);
-  rpc RequestRefund(RefundRequest) returns (RequestRefundResponse);
-  rpc Tip(TipRequest) returns (TipResponse);
-  rpc PayoutToDriver(PayoutRequest) returns (PayoutToDriverResponse);
-}
-```
-PayoutToDriver вызывает TaxiMaster.ValidateDriverActive(driver_id) через gRPC.
 #### Kafka
 Subscribes: ride.completed -> ChargeForRide; admin.refund_approved -> perform refund; tip.added.
 #### Логика
